@@ -1,0 +1,27 @@
+* { box-sizing: border-box; }
+body { margin: 0; display: flex; min-height: 100vh; font-family: system-ui, sans-serif; background: #e9ecf1; }
+.panel { width: 260px; padding: 16px; background: #fff; border-right: 1px solid #ccd; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.panel h1 { font-size: 18px; margin: 0; }
+.panel label { display: flex; flex-direction: column; gap: 4px; }
+.panel input[type=checkbox] { align-self: flex-start; }
+.row { display: flex; gap: 8px; }
+button { min-height: 36px; padding: 0 12px; cursor: pointer; }
+#status { color: #444; min-height: 2.5em; }
+#warnings { padding-left: 18px; color: #8a4b00; font-size: 12px; }
+main { flex: 1; padding: 16px; overflow: auto; }
+.frame { margin: 0 auto; transition: width 0.2s; }
+.frame.mobile { border: 8px solid #222; border-radius: 24px; overflow: hidden; }
+.block { margin-bottom: 12px; }
+.block[data-locked="true"]::before { content: "🔒 locked"; display: block; font-size: 11px; opacity: .7; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.card { padding: 12px; background: rgba(127,127,127,.12); }
+.timeline { list-style: none; margin: 0; padding: 0; border-left: 3px solid currentColor; }
+.timeline li { padding: 4px 12px; }
+.quiz button { min-height: 44px; min-width: 44px; margin: 4px 4px 0 0; }
+.animate-fade { animation: fade .6s both; }
+.animate-scale { animation: pop .4s both; }
+.animate-slide-up { animation: up .5s both; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { transform: scale(.9); opacity: 0; } }
+@keyframes up { from { transform: translateY(12px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .block, .card { animation: none !important; transition: none !important; } }

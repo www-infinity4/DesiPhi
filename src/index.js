@@ -1,0 +1,12 @@
+export { DesignEngine, createEngine } from './engine/design-engine.js';
+export { createCommandEngine, validateOperation, OPERATIONS } from './engine/command-engine.js';
+export { validateDesign } from './engine/design-validator.js';
+export { resolveStyle, resolveBaseStyle } from './engine/design-state.js';
+export { CONTROLS, STYLE_GROUPS, getFieldSpec, validateChange, flattenChanges } from './controls/index.js';
+export { BREAKPOINTS, BREAKPOINT_NAMES, breakpointForWidth } from './controls/responsive.js';
+export { checkAccessibility, contrastRatio } from './controls/accessibility.js';
+export { PRESETS } from './themes/presets.js';
+export { listThemes, resolveTheme, extendTheme } from './themes/theme-engine.js';
+export { createLayaPhiAdapter, ingestLayout, verifyPreserved } from './adapters/layaphi-adapter.js';
+export { createCodePhiAdapter, toCodePhiSpec } from './adapters/codephi-adapter.js';
+export { SCHEMA_ID, SCHEMA_VERSION } from './schema/design-schema.js';

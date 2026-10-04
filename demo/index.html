@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DesiPhi demo</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="panel" aria-label="DesiPhi controls">
+    <h1>DesiPhi demo</h1>
+    <label>Theme <select id="theme"></select></label>
+    <label>Font size <input id="fontSize" type="range" min="12" max="28" value="18"></label>
+    <label>Card radius <input id="cardRadius" type="range" min="0" max="40" value="12"></label>
+    <label>Spacing <input id="spacing" type="range" min="4" max="48" value="20"></label>
+    <label>Hero height <input id="heroHeight" type="range" min="120" max="600" value="320"></label>
+    <label><input id="mobile" type="checkbox"> Mobile preview</label>
+    <label><input id="animation" type="checkbox" checked> Animation</label>
+    <label>Lock component <select id="lockTarget"></select>
+      <button id="lock" type="button">Toggle lock</button></label>
+    <div class="row"><button id="undo" type="button">Undo</button><button id="redo" type="button">Redo</button></div>
+    <p id="status" role="status"></p>
+    <ul id="warnings"></ul>
+  </aside>
+  <main><div id="frame" class="frame"><div id="page"></div></div></main>
+  <script type="module" src="demo.js"></script>
+</body>
+</html>
