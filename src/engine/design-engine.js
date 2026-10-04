@@ -32,7 +32,13 @@ export class DesignEngine {
   }
 
   adjustProperty(targetPath, property, delta, breakpoint = null) {
-    if (typeof delta !== 'number' || !Number.isFinite(delta)) return fail({ code: 'INVALID_VALUE', message: 'ADJUST delta must be a finite number' });
+    let parsedDelta = null;
+    if (typeof delta === 'number') parsedDelta = { value: delta, unit: '' };
+    else if (typeof delta === 'string') {
+      const match = delta.trim().match(/^(-?\d+(?:\.\d+)?)(px|rem|em)?$/);
+      if (match) parsedDelta = { value: Number(match[1]), unit: match[2] || '' };
+    }
+    if (!parsedDelta || !Number.isFinite(parsedDelta.value)) return fail({ code: 'INVALID_VALUE', message: 'ADJUST delta must be a finite number or length delta' });
     const current = this.resolveStyle(targetPath, breakpoint);
     const value = getPath(current || {}, property);
     const numeric = typeof value === 'number' ? value :
@@ -40,16 +46,21 @@ export class DesignEngine {
       typeof value === 'string' && /^-?\d+(?:\.\d+)?(?:px|rem|em)$/.test(value.trim()) ? value.trim() : null;
     if (numeric === null) return fail({ code: 'INVALID_ADJUST', message: `Property "${property}" is not a numeric value that can be adjusted`, path: property, componentId: targetPath });
     let adjusted;
-    if (typeof numeric === 'number') adjusted = numeric + delta;
+    if (typeof numeric === 'number') {
+      if (parsedDelta.unit) return fail({ code: 'INVALID_ADJUST', message: 'A unit cannot be applied to a unitless property' });
+      adjusted = numeric + parsedDelta.value;
+    }
     else {
       const match = numeric.match(/^(-?\d+(?:\.\d+)?)(px|rem|em)$/);
-      adjusted = `${Number(match[1]) + delta}${match[2]}`;
+      if (parsedDelta.unit && parsedDelta.unit !== match[2]) return fail({ code: 'INVALID_ADJUST', message: 'ADJUST delta unit must match the existing length' });
+      adjusted = `${Number(match[1]) + parsedDelta.value}${match[2]}`;
     }
     return breakpoint ? this.setResponsiveOverride(targetPath, breakpoint, pathChanges(property, adjusted)) :
       this.updateComponent(targetPath, pathChanges(property, adjusted));
   }
 
   resetProperty(targetPath, property, breakpoint = null) {
+    if (typeof targetPath !== 'string' || typeof property !== 'string') return fail({ code: 'INVALID_PROPERTY', message: 'A target path and property path are required' });
     return breakpoint ? this.setResponsiveOverride(targetPath, breakpoint, pathChanges(property, null)) :
       this.updateComponent(targetPath, pathChanges(property, null));
   }
@@ -106,6 +117,7 @@ export class DesignEngine {
   setDesignIntensity(value, categories = {}) {
     return this._commit((d, errors) => {
       const validCategories = ['motion', 'decoration', 'depth', 'color', 'typography', 'imagery'];
+      if (!isPlain(categories)) { errors.push({ code: 'INVALID_INTENSITY', message: 'Intensity categories must be an object' }); return; }
       if (!Number.isInteger(value) || value < 0 || value > 100) errors.push({ code: 'INVALID_INTENSITY', message: 'Design intensity must be an integer from 0 to 100' });
       for (const [category, amount] of Object.entries(categories)) {
         if (!validCategories.includes(category) || !Number.isInteger(amount) || amount < 0 || amount > 100) {
@@ -127,9 +139,11 @@ export class DesignEngine {
         if (!allowed.includes(key)) errors.push({ code: 'INVALID_CONSTRAINT', message: `Unknown constraint "${key}"` });
         else if (typeof d.constraints[key] === 'boolean' && typeof value !== 'boolean') errors.push({ code: 'INVALID_CONSTRAINT', message: `Constraint "${key}" must be boolean` });
         else if (d.constraints[key] === null && value !== null && (!Number.isFinite(value) || value < 0)) errors.push({ code: 'INVALID_CONSTRAINT', message: `Constraint "${key}" must be a non-negative number or null` });
+        else if (['maxAnimationsPerViewport', 'maximumDecorativeLayers'].includes(key) && value !== null && !Number.isInteger(value)) errors.push({ code: 'INVALID_CONSTRAINT', message: `Constraint "${key}" must be an integer or null` });
+        else if (key === 'minimumContrast' && value !== null && value > 21) errors.push({ code: 'INVALID_CONSTRAINT', message: 'minimumContrast must be at most 21' });
       }
       if (!errors.length) Object.assign(d.constraints, clone(constraints));
-    });
+    }, { enforceConstraints: false });
   }
 
   // ---- creation / import / export ----
@@ -164,6 +178,7 @@ export class DesignEngine {
     if (typeof input === 'string') {
       try { d = JSON.parse(input); } catch { return fail({ code: 'INVALID_DESIGN', message: 'Not valid JSON' }); }
     }
+    if (isPlain(d) && d.schema === SCHEMA_ID && d.version === 1) d = migrateV1Design(d);
     const report = validateDesign(d);
     if (!report.ok) return { ok: false, errors: report.errors };
     this.design = clone(d);
@@ -192,7 +207,7 @@ export class DesignEngine {
 
   // ---- transactional core ----
 
-  _commit(mutate) {
+  _commit(mutate, { enforceConstraints = true } = {}) {
     if (!this.design) return fail({ code: 'NO_DESIGN', message: 'Call createDesign() first' });
     const next = clone(this.design);
     const errors = [];
@@ -200,6 +215,17 @@ export class DesignEngine {
     if (errors.length) return { ok: false, errors };
     const report = validateDesign(next);
     if (!report.ok) return { ok: false, errors: report.errors };
+    if (enforceConstraints) {
+      const existing = new Set(validateDesign(this.design).warnings
+        .filter((warning) => warning.code.startsWith('CONSTRAINT_'))
+        .map((warning) => JSON.stringify([warning.code, warning.componentId, warning.breakpoint, warning.actual, warning.limit, warning.message])));
+      const violations = report.warnings.filter((warning) => warning.code.startsWith('CONSTRAINT_') &&
+        !existing.has(JSON.stringify([warning.code, warning.componentId, warning.breakpoint, warning.actual, warning.limit, warning.message])));
+      if (violations.length) return {
+        ok: false,
+        errors: violations.map((warning) => ({ code: 'CONSTRAINT_VIOLATION', message: warning.message, violation: warning }))
+      };
+    }
     if (this.layout) {
       const kept = verifyPreserved(this.layout, next);
       if (!kept.ok) return { ok: false, errors: kept.errors };
@@ -372,17 +398,20 @@ export class DesignEngine {
   transaction(fn) {
     const design = this.design ? clone(this.design) : null;
     const saved = this.history.save();
+    const savedSnapshots = this.snapshots.toJSON();
     let results;
     try {
       results = fn(this);
     } catch (err) {
       this.design = design;
       this.history.load(saved);
+      this.snapshots.load(savedSnapshots);
       return { ok: false, results: [], errors: [{ code: 'TRANSACTION_FAILED', message: String(err?.message || err) }] };
     }
     if (results.every((r) => r.ok)) return { ok: true, results };
     this.design = design;
     this.history.load(saved);
+    this.snapshots.load(savedSnapshots);
     return { ok: false, results, errors: results.flatMap((r) => r.errors || []) };
   }
 
@@ -390,6 +419,28 @@ export class DesignEngine {
     if (!this.design) return { ok: false, errors: [{ code: 'NO_DESIGN', message: 'Call createDesign() first' }], warnings: [] };
     return validateDesign(this.design);
   }
+}
+
+function migrateV1Design(input) {
+  const design = clone(input);
+  if (!isPlain(design.components)) return design;
+  for (const [id, component] of Object.entries(design.components)) {
+    if (!isPlain(component)) continue;
+    const nested = createComponentRecord({ id, type: component.type, ...(component.layout || {}) }).targets;
+    component.targets ??= nested;
+    component.responsive ??= Object.fromEntries(['mobile', 'tablet', 'desktop', 'wide'].map((bp) => [bp, {}]));
+  }
+  if (Array.isArray(design.source?.components)) {
+    design.source.components = design.source.components.map((source) => ({
+      ...source,
+      layout: source.layout ?? clone(design.components[source.id]?.layout || {})
+    }));
+  }
+  const defaults = emptyDesign();
+  design.designIntensity ??= defaults.designIntensity;
+  design.constraints ??= defaults.constraints;
+  design.version = SCHEMA_VERSION;
+  return design;
 }
 
 export const createEngine = (options) => new DesignEngine(options);

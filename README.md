@@ -66,7 +66,7 @@ designs are plain JSON so they can be exported, diffed, snapshotted and stored b
 
 ```jsonc
 {
-  "schema": "desiphi.design", "version": 1,
+  "schema": "desiphi.design", "version": 2,
   "theme": "educational", "pageType": "education",
   "tokens": { "colors": {}, "typography": {}, "spacing": {}, "shape": {}, "effects": {}, "motion": {} },
   "source": { "components": [{ "id": "hero", "type": "hero" }] },   // what LayaPhi supplied
@@ -76,10 +76,13 @@ designs are plain JSON so they can be exported, diffed, snapshotted and stored b
       "id": "hero", "type": "hero",
       "layout": { },                                  // LayaPhi content/structure, untouched
       "style": { "sizing": { "minHeight": "240px" } }, // component-specific overrides (sparse)
-      "responsive": { "mobile": {}, "tablet": {}, "desktop": {}, "wide": {} }
+      "responsive": { "mobile": {}, "tablet": {}, "desktop": {}, "wide": {} },
+      "targets": { "hero/heading": { "id": "heading", "role": "heading", "style": {}, "responsive": {} } }
     }
   },
-  "locks": { "global": [], "components": { "hero": { "locked": false, "properties": [] } } }
+  "locks": { "global": [], "components": { "hero": { "locked": false, "properties": [] } } },
+  "designIntensity": { "value": 50, "categories": { "motion": 50, "decoration": 50 } },
+  "constraints": { "reducedMotion": false, "preserveLayaPhiStructure": true }
 }
 ```
 
@@ -175,8 +178,10 @@ without alt/decorative flag. Checked at the base and at every breakpoint that ha
 
 * **LayaPhi → DesiPhi**: `createLayaPhiAdapter()` → `{ ingest(layoutSpec), verify(layoutSpec, design) }`. Layout:
   `{ pageType, components: [{ id, type, ...anyContentOrStructure }] }`; ids must be unique and match `[A-Za-z][A-Za-z0-9_-]*`.
-* **DesiPhi → Code Phi**: `toCodePhiSpec(design)` returns a self-contained spec with, for each component in order,
-  `layout`, `style`, `responsive` and `resolved` styles for `base`, `mobile`, `tablet`, `desktop`, `wide`.
+* Layout updates: `engine.syncLayout(newLayoutSpec)` returns an updated design plus
+  `{ added, removed, preserved, changed, warnings }`. Styles are preserved only for exact stable IDs/paths.
+* **DesiPhi → Code Phi**: `toCodePhiSpec(design)` returns identity, LayaPhi content references, resolved tokens,
+  base and breakpoint styles, nested target styles, effects/motion, accessibility and constraints.
 
 ## How another Phi app calls DesiPhi
 
@@ -189,10 +194,73 @@ engine.applyTheme('minimal');
 const spec = toCodePhiSpec(engine.exportDesign());            // hand to Code Phi
 ```
 
+## Phase 2: targets, operations, and renderer boundary
+
+LayaPhi may represent nested design targets inside a component's own layout/content object. DesiPhi
+indexes descendants with stable `id` values as style-only records under `component.targets`, using
+paths such as `lesson-cards/card-1/image`. Target records never contain or replace LayaPhi content.
+Style and responsive overrides are resolved and locked by the complete stable target path.
+
+Selectors are deliberately not CSS selectors and are matched against the DesiPhi model only:
+
+* `#hero` or `hero` – exact component ID.
+* `#lesson-cards/card-1/image` – exact nested target path.
+* `type:card-grid` and `role:image` – all targets with that type or role.
+* `#lesson-cards/*/image` – a path wildcard, with `*` matching one stable ID segment.
+* `*` – all targets. Unsupported selector syntax is rejected; arbitrary CSS/DOM queries are not accepted.
+
+The normalized command vocabulary includes `SET`, `ADJUST`, `RESET`, `APPLY_THEME`, `APPLY_PRESET`,
+`LOCK`, `UNLOCK`, `HIDE_DECORATION`, `SHOW_DECORATION`, `RESPONSIVE_SET`, `COPY_STYLE`,
+`RESET_COMPONENT`, and `RESET_PROPERTY`, in addition to the original lower-camel operations. Example:
+
+```js
+commands.run([
+  { op: 'SET', selector: '#hero', path: 'sizing.height', value: '420px' },
+  { op: 'RESPONSIVE_SET', selector: '#hero', breakpoint: 'mobile', path: 'sizing.height', value: '260px' },
+  { op: 'LOCK', selector: '#hero', path: 'sizing.height' }
+]);
+```
+
+Themes (`PRESETS`) remain site-wide token sets. `VISUAL_PRESETS` are component/role treatments with
+`clean`, `soft`, `bold`, `compact`, `editorial`, and `immersive` variants for hero, article, card,
+card-grid, timeline, quiz, sources, navigation, and media. They are illustrative, not Phi branding.
+
+`designIntensity` stores a 0–100 policy value and category values; it never rewrites a design. Constraints
+are stored with the design and reported as validation warnings without auto-fixing styles; an operation that
+introduces a new constraint violation is rejected atomically. Optional visual
+fields cover media references/cropping/focal points, gradients/overlays, decorative layers, badges/ribbons,
+dividers, textures, icons/characters, motion states, sticky/floating positioning, transforms, depth, glass,
+shadow, and glow. These fields are opt-in and use constrained values/asset references rather than raw markup.
+
+### Code Phi renderer contract
+
+Code Phi consumes only the exported spec. It maps component identity and type to renderer-owned semantic
+elements, LayaPhi content references to text/media content, and visual properties to renderer-owned CSS
+custom properties. Breakpoint properties become responsive CSS rules; motion/effects become declarations
+from a renderer-maintained allowlist; media references are resolved through the renderer's asset registry;
+hover/focus states map to semantic interactive states. Accessibility metadata and constraints accompany
+the output and must be preserved by the renderer.
+
+DesiPhi values are data, never executable markup or arbitrary CSS. A renderer must escape text, validate
+asset references, map enums/properties through its own allowlists, and must not evaluate `innerHTML`,
+inject arbitrary style text, or run operations against the DOM. This repository does not implement that
+renderer.
+
+### Natural-language provider boundary
+
+`interpretDesignCommand(text, context, provider)` accepts a provider that returns normalized operation
+objects only. `createCommandEngine(engine, { interpreter })` sends those operations through the same
+operation validation, selector resolution, locks, constraints, transactions, and history as direct calls.
+The provider receives a cloned context and never receives a mutable design reference. Pipeline:
+
+`natural language → interpreter → normalized operations → validation → locks/constraints → atomic application → updated design`
+
+No AI API is connected. The provider cannot directly mutate design JSON or bypass deterministic validation.
+
 ## Assumptions
 
 * The repository was empty, so the project lives at the repo root (the suggested `desiphi/` is the root); `test/fixtures.js` was added as a shared test helper.
-* Layout components are a flat list; items inside a component (cards, timeline entries) are LayaPhi content styled through their parent component.
+* Top-level layout components form an ordered list; nested LayaPhi nodes with stable IDs may also be styled by path.
 * Component `type` is an open string; unknown types receive base token defaults.
 * Breakpoint overrides apply to their exact breakpoint only (no cascade), width thresholds above are assumed.
 * A rejected operation is rejected whole (atomic) rather than partially applied.
@@ -202,9 +270,6 @@ const spec = toCodePhiSpec(engine.exportDesign());            // hand to Code Ph
 
 ## Intentionally unfinished
 
-* Natural-language interpretation (only the operation interface exists).
-* Syncing a *changed* LayaPhi layout into an existing design (adding/removing components after creation).
 * Persistence (no Cloudflare/storage), multi-user/session handling, diffing UI.
-* Final Phi branding/themes, richer per-type components (nested component ids, real icon/character assets).
-* Code Phi renderer; the demo is an architecture proof only (not browser-tested in CI).
+* Final Phi branding/themes, production assets, and a complete Code Phi renderer.
 * Accessibility checks are heuristics, not a complete WCAG audit.

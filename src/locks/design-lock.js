@@ -47,10 +47,14 @@ export function checkLock(design, componentId, path) {
   const g = design.locks.global.find((l) => covers(l, path));
   if (g) return { code: 'LOCKED_GLOBAL', message: `Property "${path}" is globally locked (lock "${g}")` };
   if (componentId) {
-    const e = design.locks.components[componentId];
-    if (e?.locked) return { code: 'LOCKED_COMPONENT', message: `Component "${componentId}" is locked` };
-    const p = e?.properties.find((l) => covers(l, path));
-    if (p) return { code: 'LOCKED_PROPERTY', message: `Property "${path}" of "${componentId}" is locked (lock "${p}")` };
+    const segments = componentId.split('/');
+    for (let length = 1; length <= segments.length; length++) {
+      const ancestor = segments.slice(0, length).join('/');
+      const e = design.locks.components[ancestor];
+      if (e?.locked) return { code: 'LOCKED_COMPONENT', message: `Component "${ancestor}" is locked` };
+      const p = e?.properties.find((l) => covers(l, path));
+      if (p) return { code: 'LOCKED_PROPERTY', message: `Property "${path}" of "${ancestor}" is locked (lock "${p}")` };
+    }
   }
   return null;
 }

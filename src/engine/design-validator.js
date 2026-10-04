@@ -4,6 +4,8 @@ import { flattenChanges, validateChange, isKnownPath } from '../controls/index.j
 import { checkAccessibility } from '../controls/accessibility.js';
 import { isPlain } from '../controls/common.js';
 import { toPx } from '../controls/common.js';
+import { contrastRatio } from '../controls/accessibility.js';
+import { BREAKPOINTS } from '../controls/responsive.js';
 import { getTargetRecord, resolveStyle } from './design-state.js';
 
 function checkStyle(style, errors, componentId, where) {
@@ -87,11 +89,26 @@ export function validateDesign(design, { layoutVerifier } = {}) {
 
 function validatePolicy(design, errors) {
   const intensity = design.designIntensity;
+  const categories = ['motion', 'decoration', 'depth', 'color', 'typography', 'imagery'];
   if (!isPlain(intensity) || !Number.isInteger(intensity.value) || intensity.value < 0 || intensity.value > 100 ||
-      !isPlain(intensity.categories) || Object.values(intensity.categories).some((v) => !Number.isInteger(v) || v < 0 || v > 100)) {
+      !isPlain(intensity.categories) || Object.entries(intensity.categories).some(([key, value]) =>
+        !categories.includes(key) || !Number.isInteger(value) || value < 0 || value > 100)) {
     errors.push({ code: 'INVALID_INTENSITY', message: 'Design intensity and categories must be integers from 0 to 100' });
   }
-  if (!isPlain(design.constraints)) errors.push({ code: 'INVALID_CONSTRAINT', message: 'constraints must be an object' });
+  if (!isPlain(design.constraints)) {
+    errors.push({ code: 'INVALID_CONSTRAINT', message: 'constraints must be an object' });
+    return;
+  }
+  const allowed = ['maxAnimationsPerViewport', 'maximumTextWidth', 'minimumTouchTarget', 'minimumContrast',
+    'maximumDecorativeLayers', 'avoidHorizontalOverflow', 'reducedMotion', 'preserveContentVisibility', 'preserveLayaPhiStructure'];
+  for (const [key, value] of Object.entries(design.constraints)) {
+    const booleanKeys = ['avoidHorizontalOverflow', 'reducedMotion', 'preserveContentVisibility', 'preserveLayaPhiStructure'];
+    if (!allowed.includes(key)) errors.push({ code: 'INVALID_CONSTRAINT', message: `Unknown constraint "${key}"` });
+    else if (booleanKeys.includes(key) && typeof value !== 'boolean') errors.push({ code: 'INVALID_CONSTRAINT', message: `Constraint "${key}" must be boolean` });
+    else if (!booleanKeys.includes(key) && value !== null && (!Number.isFinite(value) || value < 0)) errors.push({ code: 'INVALID_CONSTRAINT', message: `Constraint "${key}" must be a non-negative number or null` });
+    else if (['maxAnimationsPerViewport', 'maximumDecorativeLayers'].includes(key) && value !== null && !Number.isInteger(value)) errors.push({ code: 'INVALID_CONSTRAINT', message: `Constraint "${key}" must be an integer or null` });
+    else if (key === 'minimumContrast' && value !== null && value > 21) errors.push({ code: 'INVALID_CONSTRAINT', message: 'minimumContrast must be at most 21' });
+  }
 }
 
 function checkConstraints(design) {
@@ -117,14 +134,15 @@ function checkConstraints(design) {
       const decor = style?.effects?.decorativeLayers || 0;
       decorativeLayers += decor;
       if (constraints.maximumTextWidth !== null && constraints.maximumTextWidth !== undefined) {
-        const width = toPx(style?.typography?.textWidth);
+        const textWidth = style?.typography?.textWidth;
+        const width = toPx(textWidth) ?? (typeof textWidth === 'string' && /ch$/.test(textWidth) ? Number.parseFloat(textWidth) * 8 : null);
         if (width !== null && width > constraints.maximumTextWidth) warnings.push({
           code: 'CONSTRAINT_TEXT_WIDTH', componentId: id, breakpoint: bp || 'base',
           actual: width, limit: constraints.maximumTextWidth, message: 'Maximum text width exceeded'
         });
       }
       if (constraints.minimumTouchTarget !== null && constraints.minimumTouchTarget !== undefined) {
-        const size = toPx(style?.accessibility?.minTouchTarget ?? style?.sizing?.minHeight);
+        const size = toPx(style?.sizing?.minHeight) ?? toPx(style?.sizing?.height);
         if (size !== null && size < constraints.minimumTouchTarget) warnings.push({
           code: 'CONSTRAINT_TOUCH_TARGET', componentId: id, breakpoint: bp || 'base',
           actual: size, limit: constraints.minimumTouchTarget, message: 'Minimum touch target constraint violated'
@@ -133,6 +151,25 @@ function checkConstraints(design) {
       if (constraints.reducedMotion && style?.motion?.enabled && style.motion.reducedMotion !== 'disable') warnings.push({
         code: 'CONSTRAINT_REDUCED_MOTION', componentId: id, breakpoint: bp || 'base', message: 'Motion does not honor the reduced-motion constraint'
       });
+      if (constraints.minimumContrast !== null && constraints.minimumContrast !== undefined) {
+        const ratio = contrastRatio(style?.colors?.foreground, style?.colors?.background);
+        if (ratio !== null && ratio < constraints.minimumContrast) warnings.push({
+          code: 'CONSTRAINT_MINIMUM_CONTRAST', componentId: id, breakpoint: bp || 'base',
+          actual: ratio, limit: constraints.minimumContrast, message: 'Minimum contrast constraint violated'
+        });
+      }
+      if (constraints.avoidHorizontalOverflow) {
+        const viewport = bp ? BREAKPOINTS.find((item) => item.name === bp)?.previewWidth : 1280;
+        const width = toPx(style?.sizing?.width) ?? toPx(style?.sizing?.minWidth);
+        if (width !== null && width > viewport) warnings.push({
+          code: 'CONSTRAINT_HORIZONTAL_OVERFLOW', componentId: id, breakpoint: bp || 'base',
+          actual: width, limit: viewport, message: 'Avoid-horizontal-overflow constraint violated'
+        });
+      }
+      if (constraints.preserveContentVisibility &&
+          (style?.colors?.opacity === 0 || style?.sizing?.height === '0px' || style?.sizing?.minHeight === '0px')) {
+        warnings.push({ code: 'CONSTRAINT_CONTENT_VISIBILITY', componentId: id, breakpoint: bp || 'base', message: 'Content visibility constraint violated' });
+      }
     }
     if (constraints.maximumDecorativeLayers !== null && constraints.maximumDecorativeLayers !== undefined &&
         decorativeLayers > constraints.maximumDecorativeLayers) warnings.push({

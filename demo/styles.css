@@ -15,6 +15,10 @@ main { flex: 1; padding: 16px; overflow: auto; }
 .block[data-locked="true"]::before { content: "🔒 locked"; display: block; font-size: 11px; opacity: .7; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .card { padding: 12px; background: rgba(127,127,127,.12); }
+.image-target { min-height: 54px; display: grid; place-items: center; margin-bottom: 8px; background: linear-gradient(135deg, #dbeafe, #fef3c7); color: #334155; font-size: 12px; }
+.inspector { min-width: 0; }
+.inspector h2 { font-size: 14px; margin: 0 0 4px; }
+.inspector pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; background: #f6f7f9; padding: 8px; }
 .timeline { list-style: none; margin: 0; padding: 0; border-left: 3px solid currentColor; }
 .timeline li { padding: 4px 12px; }
 .quiz button { min-height: 44px; min-width: 44px; margin: 4px 4px 0 0; }
@@ -25,3 +29,10 @@ main { flex: 1; padding: 16px; overflow: auto; }
 @keyframes pop { from { transform: scale(.9); opacity: 0; } }
 @keyframes up { from { transform: translateY(12px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .block, .card { animation: none !important; transition: none !important; } }
+@media (max-width: 720px) {
+  body { flex-direction: column; }
+  .panel { width: auto; border-right: 0; border-bottom: 1px solid #ccd; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel h1, .inspector { grid-column: 1 / -1; }
+  main { min-width: 0; padding: 8px; }
+  .frame { min-width: 0; }
+}

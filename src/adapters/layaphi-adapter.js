@@ -28,6 +28,28 @@ export function ingestLayout(layoutSpec, { allowEmpty = false } = {}) {
       if (typeof c.type !== 'string' || !c.type) {
         errors.push({ code: 'INVALID_LAYOUT', message: `components[${i}].type must be a non-empty string` });
       }
+      if (typeof c.id === 'string') {
+        const paths = new Set();
+        const inspect = (value, parentPath, seen = new WeakSet()) => {
+          if (!value || typeof value !== 'object' || seen.has(value)) return;
+          seen.add(value);
+          if (Array.isArray(value)) {
+            value.forEach((item) => inspect(item, parentPath, seen));
+            return;
+          }
+          let path = parentPath;
+          if (typeof value.id === 'string' && value.id !== c.id) {
+            if (!ID_RE.test(value.id)) errors.push({ code: 'INVALID_LAYOUT', message: `Nested target id "${value.id}" must match ${ID_RE}`, componentId: c.id });
+            else {
+              path = `${parentPath}/${value.id}`;
+              if (paths.has(path)) errors.push({ code: 'INVALID_LAYOUT', message: `Duplicate nested target path "${path}"`, componentId: c.id });
+              paths.add(path);
+            }
+          }
+          for (const [key, child] of Object.entries(value)) if (key !== 'id') inspect(child, path, seen);
+        };
+        inspect(c, c.id);
+      }
     });
   }
   if (errors.length) return { ok: false, errors };
@@ -63,6 +85,9 @@ export function syncLayout(existingDesign, newLayoutSpec) {
   const incomingIds = new Set(ing.layout.components.map((entry) => entry.id));
   const added = [];
   const removed = (existingDesign.order || []).filter((id) => !incomingIds.has(id));
+  const reordered = ing.layout.components
+    .filter((entry, index) => existingDesign.order?.[index] !== entry.id)
+    .map((entry) => entry.id);
   const preserved = [];
   const changed = [];
   const warnings = [];
@@ -102,9 +127,13 @@ export function syncLayout(existingDesign, newLayoutSpec) {
   }
   const oldLocks = next.locks?.components || {};
   next.locks.components = Object.fromEntries(Object.entries(oldLocks).filter(([id]) => validLockTargets.has(id)));
-  for (const id of removed) {
-    if (oldLocks[id]?.locked || oldLocks[id]?.properties?.length) {
-      warnings.push({ code: 'REMOVED_LOCKED_COMPONENT', componentId: id, message: `Removed locks for deleted LayaPhi component "${id}"` });
+  for (const [id, lock] of Object.entries(oldLocks)) {
+    if (!validLockTargets.has(id) && (lock.locked || lock.properties?.length)) {
+      warnings.push({
+        code: removed.includes(id) ? 'REMOVED_LOCKED_COMPONENT' : 'REMOVED_LOCKED_TARGET',
+        componentId: id,
+        message: `Removed locks for deleted LayaPhi target "${id}"`
+      });
     }
   }
 
@@ -119,9 +148,9 @@ export function syncLayout(existingDesign, newLayoutSpec) {
     ok: true,
     design: next,
     layout: ing.layout,
-    report: { added, removed, preserved, changed, warnings }
+    report: { added, removed, preserved, changed, reordered, warnings }
   };
 }
 
-export const createLayaPhiAdapter = () => ({ ingest: ingestLayout, verify: verifyPreserved });
+export const createLayaPhiAdapter = () => ({ ingest: ingestLayout, verify: verifyPreserved, sync: syncLayout });
 import { createComponentRecord } from '../schema/component-schema.js';

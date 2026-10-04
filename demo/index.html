@@ -10,14 +10,22 @@
   <aside class="panel" aria-label="DesiPhi controls">
     <h1>DesiPhi demo</h1>
     <label>Theme <select id="theme"></select></label>
+    <label>Design target <select id="target"></select></label>
+    <label>Responsive breakpoint <select id="breakpoint"><option value="base">base</option><option>desktop</option><option>mobile</option><option>tablet</option><option>wide</option></select></label>
     <label>Font size <input id="fontSize" type="range" min="12" max="28" value="18"></label>
-    <label>Card radius <input id="cardRadius" type="range" min="0" max="40" value="12"></label>
+    <label>Font family <input id="fontFamily" type="text" value="system-ui, sans-serif"></label>
+    <label>Shape radius <input id="cardRadius" type="range" min="0" max="40" value="12"></label>
     <label>Spacing <input id="spacing" type="range" min="4" max="48" value="20"></label>
-    <label>Hero height <input id="heroHeight" type="range" min="120" max="600" value="320"></label>
+    <label>Target height <input id="heroHeight" type="range" min="120" max="600" value="320"></label>
+    <label>Accent color <input id="accent" type="color" value="#2563eb"></label>
+    <label><input id="glass" type="checkbox"> Glass effect</label>
     <label><input id="mobile" type="checkbox"> Mobile preview</label>
-    <label><input id="animation" type="checkbox" checked> Animation</label>
-    <label>Lock component <select id="lockTarget"></select>
-      <button id="lock" type="button">Toggle lock</button></label>
+    <label><input id="animation" type="checkbox"> Animation</label>
+    <label>Design intensity <input id="intensity" type="range" min="0" max="100" value="50"></label>
+    <div class="row"><button id="lock" type="button">Lock target</button><button id="unlock" type="button">Unlock target</button></div>
+    <label>Copy style to <select id="copyTarget"></select><button id="copy" type="button">Copy style</button></label>
+    <button id="resetProperty" type="button">Reset target height</button>
+    <section class="inspector"><h2>Inspector</h2><pre id="inspector"></pre></section>
     <div class="row"><button id="undo" type="button">Undo</button><button id="redo" type="button">Redo</button></div>
     <p id="status" role="status"></p>
     <ul id="warnings"></ul>

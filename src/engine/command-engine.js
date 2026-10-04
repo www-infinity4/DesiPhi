@@ -115,7 +115,7 @@ function applyOperation(engine, operation) {
       case 'SHOW_DECORATION':
         return engine.updateComponent(target.path, { effects: { decorationVisible: true } });
       case 'APPLY_PRESET': {
-        const preset = resolveVisualPreset(target.type, operation.preset);
+        const preset = resolveVisualPreset(target.role || target.type, operation.preset);
         return preset.ok ? engine.updateComponent(target.path, preset.changes) : preset;
       }
       default:
@@ -155,7 +155,7 @@ export function createCommandEngine(engine, { interpreter = null } = {}) {
 
   function run(input, context = {}) {
     if (typeof input !== 'string') return execute(input);
-    const parsed = interpretDesignCommand(input, { design: engine.getDesign(), ...context }, interpreter);
+    const parsed = interpretDesignCommand(input, { ...context, design: engine.getDesign() }, interpreter);
     return parsed.ok ? execute(parsed.operations) : { ...parsed, results: [] };
   }
 

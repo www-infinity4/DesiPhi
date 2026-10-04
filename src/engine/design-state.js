@@ -54,7 +54,7 @@ export function deletePath(obj, path) {
 export function resolveBaseStyle(design, componentId) {
   const target = getTargetRecord(design, componentId);
   if (!target) return null;
-  const type = target.type || design.components[parentComponentId(componentId)].type;
+  const type = target.type || target.role || design.components[parentComponentId(componentId)].type;
   return deepMerge(defaultsFor(type, design.tokens), clone(target.style));
 }
 

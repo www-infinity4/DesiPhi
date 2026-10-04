@@ -29,8 +29,7 @@ export function resolveSelector(design, selector) {
     matches = targets.filter((target) => target.role === value);
   } else {
     const path = input.startsWith('#') ? input.slice(1) : input;
-    if (!/^[A-Za-z][A-Za-z0-9_*-]*(?:\/[A-Za-z][A-Za-z0-9_*-]*)*$/.test(path) ||
-        path.split('/').some((part) => part.includes('*') && part !== '*')) return invalidSelector(selector);
+    if (path.split('/').some((part) => part !== '*' && !/^[A-Za-z][A-Za-z0-9_-]*$/.test(part))) return invalidSelector(selector);
     const exact = getTargetRecord(design, path);
     if (exact) matches = targets.filter((target) => target.path === path);
     else if (path.includes('*')) {

@@ -3,7 +3,7 @@
 
 const base = {
   spacing: { padding: '16px', gap: '16px', margin: '0' },
-  motion: { enabled: true, transition: 'all 200ms ease', duration: 200, entrance: 'fade', hover: 'none', reducedMotion: 'disable' },
+  motion: { enabled: false, transition: 'none', duration: 0, entrance: 'none', exit: 'none', hover: 'none', scroll: 'none', reducedMotion: 'disable' },
   effects: { shadow: 'none', glass: false, depth: 0 }
 };
 

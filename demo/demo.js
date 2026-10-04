@@ -1,5 +1,5 @@
 // The DOM here is only a *view* of the design; the engine's design object is the source of truth.
-import { createEngine, listThemes, resolveStyle } from '../src/index.js';
+import { createEngine, listThemes, resolveStyle, listDesignTargets } from '../src/index.js';
 import { BREAKPOINTS } from '../src/controls/responsive.js';
 
 const layoutSpec = {
@@ -8,7 +8,11 @@ const layoutSpec = {
     { id: 'hero', type: 'hero', title: 'The Roman Republic', subtitle: 'How a city became a power' },
     { id: 'overview', type: 'article', heading: 'Overview', body: 'Rome grew from a small settlement into a republic governed by elected officials and a senate.' },
     { id: 'timeline', type: 'timeline', heading: 'Timeline', items: [['509 BCE', 'Republic founded'], ['264 BCE', 'Punic Wars begin'], ['27 BCE', 'Empire begins']] },
-    { id: 'lesson-cards', type: 'card-grid', heading: 'Lessons', items: [['Government', 'Senate and consuls'], ['Army', 'The legions'], ['Daily life', 'Forum and farms']] },
+    { id: 'lesson-cards', type: 'card-grid', heading: 'Lessons', items: [
+      { id: 'card-1', title: 'Government', description: 'Senate and consuls', image: { id: 'image', role: 'image' }, headingTarget: { id: 'heading', role: 'heading' }, bodyTarget: { id: 'body', role: 'body' }, button: { id: 'button', role: 'button', label: 'Explore' } },
+      { id: 'card-2', title: 'Army', description: 'The legions', image: { id: 'image', role: 'image' }, headingTarget: { id: 'heading', role: 'heading' }, bodyTarget: { id: 'body', role: 'body' }, button: { id: 'button', role: 'button', label: 'Explore' } },
+      { id: 'card-3', title: 'Daily life', description: 'Forum and farms', image: { id: 'image', role: 'image' }, headingTarget: { id: 'heading', role: 'heading' }, bodyTarget: { id: 'body', role: 'body' }, button: { id: 'button', role: 'button', label: 'Explore' } }
+    ] },
     { id: 'quiz', type: 'quiz', heading: 'Quick quiz', question: 'When was the Republic founded?', options: ['509 BCE', '27 BCE'] },
     { id: 'sources', type: 'sources', heading: 'Sources', items: ['Livy, Ab Urbe Condita', 'Polybius, Histories'] }
   ]
@@ -38,6 +42,7 @@ function cssFor(s) {
   if (sh.border) { put('borderWidth', sh.border.width); put('borderStyle', sh.border.style); put('borderColor', sh.border.color); }
   put('padding', sp.padding); put('margin', sp.margin);
   put('boxShadow', ef.shadow);
+  if (ef.glass) { put('backdropFilter', 'blur(12px)'); put('backgroundColor', 'rgba(255,255,255,.35)'); }
   return o;
 }
 
@@ -54,7 +59,30 @@ function bodyFor(comp) {
     frag.append(ul);
   } else if (comp.type === 'card-grid') {
     const g = el('div', undefined, 'cards');
-    l.items.forEach(([a, b]) => { const c = el('div', undefined, 'card'); c.append(el('strong', a), el('p', b)); g.append(c); });
+    l.items.forEach((item, index) => {
+      const title = Array.isArray(item) ? item[0] : item.title;
+      const description = Array.isArray(item) ? item[1] : item.description;
+      const nested = Array.isArray(item) ? null : item;
+      const path = `${comp.id}/${nested?.id || `card-${index + 1}`}`;
+      const card = el('div', undefined, 'card');
+      card.dataset.target = path;
+      if (nested?.image) {
+        const image = el('div', 'Image target', 'image-target');
+        image.dataset.target = `${path}/${nested.image.id}`;
+        card.append(image);
+      }
+      const heading = el('strong', title);
+      if (nested?.headingTarget) heading.dataset.target = `${path}/${nested.headingTarget.id}`;
+      const body = el('p', description);
+      if (nested?.bodyTarget) body.dataset.target = `${path}/${nested.bodyTarget.id}`;
+      card.append(heading, body);
+      if (nested?.button) {
+        const button = el('button', nested.button.label);
+        button.dataset.target = `${path}/${nested.button.id}`;
+        card.append(button);
+      }
+      g.append(card);
+    });
     frag.append(g);
   } else if (comp.type === 'quiz') {
     frag.append(el('p', l.question));
@@ -67,7 +95,7 @@ function bodyFor(comp) {
 
 function render() {
   const d = engine.getDesign();
-  const bp = $('mobile').checked ? 'mobile' : 'desktop';
+  const bp = $('mobile').checked ? 'mobile' : ($('breakpoint').value === 'base' ? 'desktop' : $('breakpoint').value);
   const frame = $('frame');
   frame.classList.toggle('mobile', bp === 'mobile');
   frame.style.width = bp === 'mobile' ? px(BREAKPOINTS[0].previewWidth) : '100%';
@@ -78,16 +106,28 @@ function render() {
     const s = resolveStyle(d, id, bp);
     const node = el('section', undefined, 'block');
     node.dataset.id = id;
+    node.dataset.target = id;
     node.dataset.locked = String(!!d.locks.components[id]?.locked);
     Object.assign(node.style, cssFor(s));
     if (s.motion?.enabled && s.motion.entrance !== 'none') node.classList.add(`animate-${s.motion.entrance}`);
     node.append(bodyFor(comp));
     page.append(node);
-    if (comp.type === 'card-grid') {
-      node.querySelectorAll('.card').forEach((c) => { c.style.borderRadius = s.shape?.radius ?? ''; c.style.gap = s.spacing?.gap ?? ''; });
-      node.querySelector('.cards').style.gap = s.spacing?.gap ?? '';
-    }
+    node.querySelectorAll('[data-target]').forEach((child) => {
+      if (child.dataset.target === id) return;
+      const targetStyle = resolveStyle(d, child.dataset.target, bp);
+      if (targetStyle) Object.assign(child.style, cssFor(targetStyle));
+    });
   }
+  const selected = $('target').value || 'hero';
+  const selectedInfo = listDesignTargets(d).find((target) => target.path === selected);
+  $('inspector').textContent = JSON.stringify({
+    target: selectedInfo,
+    locked: !!d.locks.components[selected]?.locked,
+    designStyle: selectedInfo ? (selectedInfo.path.includes('/')
+      ? d.components[selectedInfo.componentId].targets[selectedInfo.path].style
+      : d.components[selected].style) : null,
+    resolved: resolveStyle(d, selected, bp)
+  }, null, 2);
   $('undo').disabled = !engine.canUndo();
   $('redo').disabled = !engine.canRedo();
   const report = engine.validateDesign();
@@ -102,22 +142,41 @@ function run(result, message) {
 
 const themeSel = $('theme');
 listThemes().forEach((t) => themeSel.append(new Option(t, t)));
-engine.getDesign().order.forEach((id) => $('lockTarget').append(new Option(id, id)));
+function refreshTargets() {
+  const targets = listDesignTargets(engine.getDesign());
+  for (const selectId of ['target', 'copyTarget']) {
+    const select = $(selectId);
+    const current = select.value;
+    select.replaceChildren(...targets.map((target) => new Option(`${target.path} (${target.role || target.type})`, target.path)));
+    if (targets.some((target) => target.path === current)) select.value = current;
+  }
+}
+refreshTargets();
+const applyTarget = (changes) => {
+  const breakpoint = $('breakpoint').value;
+  run(breakpoint === 'base' ? engine.updateComponent($('target').value, changes) :
+    engine.setResponsiveOverride($('target').value, breakpoint, changes));
+};
 
 themeSel.onchange = () => run(engine.applyTheme(themeSel.value), `Theme: ${themeSel.value}`);
-$('fontSize').onchange = (e) => run(engine.applyDesign({ components: { overview: { typography: { fontSize: px(e.target.value) } } } }), 'Font size changed');
-$('cardRadius').onchange = (e) => run(engine.updateComponent('lesson-cards', { shape: { radius: px(e.target.value) } }));
-$('spacing').onchange = (e) => run(engine.applyDesign({ components: { overview: { spacing: { padding: px(e.target.value) } }, 'lesson-cards': { spacing: { gap: px(e.target.value) } } } }));
-$('heroHeight').onchange = (e) => run(engine.updateComponent('hero', { sizing: { minHeight: px(e.target.value) } }));
+$('fontSize').oninput = (e) => applyTarget({ typography: { fontSize: px(e.target.value) } });
+$('fontFamily').onchange = (e) => applyTarget({ typography: { fontFamily: e.target.value } });
+$('cardRadius').oninput = (e) => applyTarget({ shape: { radius: px(e.target.value) } });
+$('spacing').oninput = (e) => applyTarget({ spacing: { padding: px(e.target.value), gap: px(e.target.value) } });
+$('heroHeight').oninput = (e) => applyTarget({ sizing: { height: px(e.target.value) } });
+$('accent').onchange = (e) => applyTarget({ colors: { accent: e.target.value } });
+$('glass').onchange = (e) => applyTarget({ effects: { glass: e.target.checked } });
+$('intensity').oninput = (e) => run(engine.setDesignIntensity(Number(e.target.value)), 'Design intensity changed');
+$('target').onchange = render;
+$('breakpoint').onchange = render;
 $('mobile').onchange = render;
-$('animation').onchange = (e) => {
-  const comps = Object.fromEntries(engine.getDesign().order.map((id) => [id, { motion: { enabled: e.target.checked } }]));
-  run(engine.applyDesign({ components: comps }), `Animation ${e.target.checked ? 'on' : 'off'}`);
-};
-$('lock').onclick = () => {
-  const id = $('lockTarget').value;
-  const locked = engine.getDesign().locks.components[id]?.locked;
-  run(locked ? engine.unlockComponent(id) : engine.lockComponent(id), `${id} ${locked ? 'unlocked' : 'locked'}`);
+$('animation').onchange = (e) => applyTarget({ motion: { enabled: e.target.checked } });
+$('lock').onclick = () => run(engine.lockComponent($('target').value), 'Target locked');
+$('unlock').onclick = () => run(engine.unlockComponent($('target').value), 'Target unlocked');
+$('copy').onclick = () => run(engine.copyStyle($('target').value, $('copyTarget').value), 'Style copied');
+$('resetProperty').onclick = () => {
+  const breakpoint = $('breakpoint').value;
+  run(engine.resetProperty($('target').value, 'sizing.height', breakpoint === 'base' ? null : breakpoint), 'Height reset');
 };
 $('undo').onclick = () => run(engine.undo(), 'Undone');
 $('redo').onclick = () => run(engine.redo(), 'Redone');
