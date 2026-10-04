@@ -4,7 +4,7 @@
 // invalid operations; they return { ok:false, errors:[...] }.
 import { emptyDesign, SCHEMA_ID, SCHEMA_VERSION, STRUCTURAL_KEYS } from '../schema/design-schema.js';
 import { createComponentRecord } from '../schema/component-schema.js';
-import { ingestLayout, verifyPreserved } from '../adapters/layaphi-adapter.js';
+import { ingestLayout, verifyPreserved, syncLayout as synchronizeLayout } from '../adapters/layaphi-adapter.js';
 import { PRESETS } from '../themes/presets.js';
 import { resolveTheme } from '../themes/theme-engine.js';
 import { flattenChanges, validateChange, isKnownPath } from '../controls/index.js';
@@ -14,9 +14,13 @@ import { createHistory } from '../history/undo.js';
 import { createSnapshotStore } from '../history/snapshots.js';
 import * as locks from '../locks/design-lock.js';
 import { validateDesign } from './design-validator.js';
-import { clone, getPath, setPath, deletePath, resolveBaseStyle, resolveStyle } from './design-state.js';
+import { clone, getPath, setPath, deletePath, resolveBaseStyle, resolveStyle, getTargetRecord } from './design-state.js';
 
 const fail = (...errors) => ({ ok: false, errors });
+const pathChanges = (path, value) => {
+  const parts = path.split('.');
+  return parts.reduceRight((child, key, index) => ({ [key]: index === parts.length - 1 ? value : child }), {});
+};
 
 export class DesignEngine {
   constructor({ themes = PRESETS, historyLimit = 100, clock } = {}) {
@@ -25,6 +29,107 @@ export class DesignEngine {
     this.snapshots = createSnapshotStore(clock ? { clock } : {});
     this.design = null;
     this.layout = null;
+  }
+
+  adjustProperty(targetPath, property, delta, breakpoint = null) {
+    if (typeof delta !== 'number' || !Number.isFinite(delta)) return fail({ code: 'INVALID_VALUE', message: 'ADJUST delta must be a finite number' });
+    const current = this.resolveStyle(targetPath, breakpoint);
+    const value = getPath(current || {}, property);
+    const numeric = typeof value === 'number' ? value :
+      typeof value === 'string' && /^-?\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) :
+      typeof value === 'string' && /^-?\d+(?:\.\d+)?(?:px|rem|em)$/.test(value.trim()) ? value.trim() : null;
+    if (numeric === null) return fail({ code: 'INVALID_ADJUST', message: `Property "${property}" is not a numeric value that can be adjusted`, path: property, componentId: targetPath });
+    let adjusted;
+    if (typeof numeric === 'number') adjusted = numeric + delta;
+    else {
+      const match = numeric.match(/^(-?\d+(?:\.\d+)?)(px|rem|em)$/);
+      adjusted = `${Number(match[1]) + delta}${match[2]}`;
+    }
+    return breakpoint ? this.setResponsiveOverride(targetPath, breakpoint, pathChanges(property, adjusted)) :
+      this.updateComponent(targetPath, pathChanges(property, adjusted));
+  }
+
+  resetProperty(targetPath, property, breakpoint = null) {
+    return breakpoint ? this.setResponsiveOverride(targetPath, breakpoint, pathChanges(property, null)) :
+      this.updateComponent(targetPath, pathChanges(property, null));
+  }
+
+  resetComponent(targetPath) {
+    return this._commit((d, errors) => {
+      const target = this._component(d, targetPath, errors);
+      if (!target) return;
+      for (const [path] of flattenChanges(target.style)) {
+        const bad = locks.checkLock(d, targetPath, path);
+        if (bad) errors.push({ ...bad, componentId: targetPath, path });
+      }
+      for (const [bp, values] of Object.entries(target.responsive)) {
+        for (const [path] of flattenChanges(values)) {
+          const bad = locks.checkLock(d, targetPath, path);
+          if (bad) errors.push({ ...bad, componentId: targetPath, path, breakpoint: bp });
+        }
+      }
+      if (errors.length) return;
+      target.style = {};
+      target.responsive = Object.fromEntries(Object.keys(target.responsive).map((bp) => [bp, {}]));
+    });
+  }
+
+  copyStyle(sourcePath, destinationPath) {
+    if (!this.design) return fail({ code: 'NO_DESIGN', message: 'Call createDesign() first' });
+    const source = getTargetRecord(this.design, sourcePath);
+    if (!source) return fail({ code: 'UNKNOWN_COMPONENT', message: `Unknown component "${sourcePath}"`, componentId: sourcePath });
+    const destination = getTargetRecord(this.design, destinationPath);
+    if (!destination) return fail({ code: 'UNKNOWN_COMPONENT', message: `Unknown component "${destinationPath}"`, componentId: destinationPath });
+    return this._commit((d, errors) => {
+      const dest = getTargetRecord(d, destinationPath);
+      const leaves = [...flattenChanges(dest.style), ...Object.values(dest.responsive).flatMap((values) => flattenChanges(values))];
+      for (const [path] of leaves) {
+        const bad = locks.checkLock(d, destinationPath, path);
+        if (bad) errors.push({ ...bad, componentId: destinationPath, path });
+      }
+      for (const [bp, values] of Object.entries(source.responsive)) {
+        for (const [path] of flattenChanges(values)) {
+          const bad = locks.checkLock(d, destinationPath, path);
+          if (bad) errors.push({ ...bad, componentId: destinationPath, path, breakpoint: bp });
+        }
+      }
+      for (const [path] of flattenChanges(source.style)) {
+        const bad = locks.checkLock(d, destinationPath, path);
+        if (bad) errors.push({ ...bad, componentId: destinationPath, path });
+      }
+      if (errors.length) return;
+      dest.style = clone(source.style);
+      dest.responsive = clone(source.responsive);
+    });
+  }
+
+  setDesignIntensity(value, categories = {}) {
+    return this._commit((d, errors) => {
+      const validCategories = ['motion', 'decoration', 'depth', 'color', 'typography', 'imagery'];
+      if (!Number.isInteger(value) || value < 0 || value > 100) errors.push({ code: 'INVALID_INTENSITY', message: 'Design intensity must be an integer from 0 to 100' });
+      for (const [category, amount] of Object.entries(categories)) {
+        if (!validCategories.includes(category) || !Number.isInteger(amount) || amount < 0 || amount > 100) {
+          errors.push({ code: 'INVALID_INTENSITY', message: `Invalid intensity category "${category}"` });
+        }
+      }
+      if (!errors.length) {
+        d.designIntensity.value = value;
+        Object.assign(d.designIntensity.categories, categories);
+      }
+    });
+  }
+
+  setConstraints(constraints) {
+    return this._commit((d, errors) => {
+      if (!isPlain(constraints)) { errors.push({ code: 'INVALID_CONSTRAINT', message: 'Constraints must be an object' }); return; }
+      const allowed = Object.keys(d.constraints);
+      for (const [key, value] of Object.entries(constraints)) {
+        if (!allowed.includes(key)) errors.push({ code: 'INVALID_CONSTRAINT', message: `Unknown constraint "${key}"` });
+        else if (typeof d.constraints[key] === 'boolean' && typeof value !== 'boolean') errors.push({ code: 'INVALID_CONSTRAINT', message: `Constraint "${key}" must be boolean` });
+        else if (d.constraints[key] === null && value !== null && (!Number.isFinite(value) || value < 0)) errors.push({ code: 'INVALID_CONSTRAINT', message: `Constraint "${key}" must be a non-negative number or null` });
+      }
+      if (!errors.length) Object.assign(d.constraints, clone(constraints));
+    });
   }
 
   // ---- creation / import / export ----
@@ -41,7 +146,7 @@ export class DesignEngine {
     for (const entry of ing.layout.components) {
       d.components[entry.id] = createComponentRecord(entry);
       d.order.push(entry.id);
-      d.source.components.push({ id: entry.id, type: entry.type });
+      d.source.components.push({ id: entry.id, type: entry.type, layout: clone(d.components[entry.id].layout) });
     }
     this.layout = ing.layout;
     this.design = d;
@@ -69,8 +174,21 @@ export class DesignEngine {
   }
 
   getDesign() { return this.design ? clone(this.design) : null; }
-  getComponent(id) { const c = this.design?.components[id]; return c ? clone(c) : null; }
+  getComponent(id) { const c = this.design ? getTargetRecord(this.design, id) : null; return c ? clone(c) : null; }
   resolveStyle(id, breakpoint = null) { return this.design ? resolveStyle(this.design, id, breakpoint) : null; }
+
+  /** Apply a newer LayaPhi layout without fuzzy matching or losing styles on stable target paths. */
+  syncLayout(layoutSpec) {
+    if (!this.design) return fail({ code: 'NO_DESIGN', message: 'Call createDesign() first' });
+    const result = synchronizeLayout(this.design, layoutSpec);
+    if (!result.ok) return result;
+    const validation = validateDesign(result.design);
+    if (!validation.ok) return { ok: false, errors: validation.errors };
+    this.history.record(this.design);
+    this.design = result.design;
+    this.layout = clone(result.layout);
+    return { ok: true, design: clone(this.design), report: result.report, warnings: validation.warnings };
+  }
 
   // ---- transactional core ----
 
@@ -102,7 +220,7 @@ export class DesignEngine {
   }
 
   _component(design, id, errors) {
-    const c = design.components[id];
+    const c = getTargetRecord(design, id);
     if (!c) errors.push({ code: 'UNKNOWN_COMPONENT', message: `Unknown component "${id}"`, componentId: id });
     return c;
   }
@@ -182,10 +300,12 @@ export class DesignEngine {
     // Locked components/properties keep their current look: pin the previous resolved values.
     for (const [id, lock] of Object.entries(d.locks.components)) {
       const resolved = resolveBaseStyle(before, id);
-      if (lock.locked) d.components[id].style = resolved;
+      const target = getTargetRecord(d, id);
+      if (!target) continue;
+      if (lock.locked) target.style = resolved;
       else for (const p of lock.properties) {
         const v = getPath(resolved, p);
-        if (v !== undefined) setPath(d.components[id].style, p, clone(v));
+        if (v !== undefined) setPath(target.style, p, clone(v));
       }
     }
   }

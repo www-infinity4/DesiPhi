@@ -3,6 +3,8 @@ import { BREAKPOINT_NAMES } from '../controls/responsive.js';
 import { flattenChanges, validateChange, isKnownPath } from '../controls/index.js';
 import { checkAccessibility } from '../controls/accessibility.js';
 import { isPlain } from '../controls/common.js';
+import { toPx } from '../controls/common.js';
+import { getTargetRecord, resolveStyle } from './design-state.js';
 
 function checkStyle(style, errors, componentId, where) {
   if (!isPlain(style)) {
@@ -40,6 +42,7 @@ export function validateDesign(design, { layoutVerifier } = {}) {
     const rec = design.components[c.id];
     if (!rec) errors.push({ code: 'COMPONENT_MISSING', message: `LayaPhi component "${c.id}" is missing`, componentId: c.id });
     else if (rec.type !== c.type) errors.push({ code: 'COMPONENT_CHANGED', message: `Component "${c.id}" changed type`, componentId: c.id });
+    else if (c.layout && JSON.stringify(rec.layout) !== JSON.stringify(c.layout)) errors.push({ code: 'LAYOUT_CHANGED', message: `LayaPhi content or metadata for "${c.id}" differs from its source`, componentId: c.id });
     if (design.order[i] !== c.id) errors.push({ code: 'COMPONENT_REORDERED', message: `Component order differs at "${c.id}"`, componentId: c.id });
   });
   if (design.order.length !== src.length || Object.keys(design.components).length !== src.length) {
@@ -55,15 +58,90 @@ export function validateDesign(design, { layoutVerifier } = {}) {
       if (!BREAKPOINT_NAMES.includes(bp)) errors.push({ code: 'INVALID_BREAKPOINT', message: `Unknown breakpoint "${bp}"`, componentId: id });
       else checkStyle(ov, errors, id, `responsive.${bp}`);
     }
+    if (!isPlain(comp.targets || {})) errors.push({ code: 'INVALID_DESIGN', message: 'targets must be an object', componentId: id });
+    for (const [path, target] of Object.entries(comp.targets || {})) {
+      if (!path.startsWith(`${id}/`) || !isPlain(target) || typeof target.id !== 'string') {
+        errors.push({ code: 'INVALID_TARGET', message: `Invalid nested target "${path}"`, componentId: id });
+        continue;
+      }
+      checkStyle(target.style, errors, path, 'target.style');
+      if (!isPlain(target.responsive)) errors.push({ code: 'INVALID_DESIGN', message: 'target responsive must be an object', componentId: path });
+      else for (const [bp, ov] of Object.entries(target.responsive)) {
+        if (!BREAKPOINT_NAMES.includes(bp)) errors.push({ code: 'INVALID_BREAKPOINT', message: `Unknown breakpoint "${bp}"`, componentId: path });
+        else checkStyle(ov, errors, path, `target.responsive.${bp}`);
+      }
+    }
   }
 
   const lockPaths = [...(design.locks.global || [])];
   for (const [id, l] of Object.entries(design.locks.components || {})) {
-    if (!design.components[id]) errors.push({ code: 'INVALID_LOCK', message: `Lock refers to unknown component "${id}"`, componentId: id });
+    if (!getTargetRecord(design, id)) errors.push({ code: 'INVALID_LOCK', message: `Lock refers to unknown target "${id}"`, componentId: id });
     lockPaths.push(...(l.properties || []));
   }
   for (const p of lockPaths) if (!isKnownPath(p)) errors.push({ code: 'INVALID_LOCK', message: `Lock refers to unknown property "${p}"`, path: p });
+  validatePolicy(design, errors);
 
-  const warnings = errors.length ? [] : checkAccessibility(design);
+  const warnings = errors.length ? [] : [...checkAccessibility(design), ...checkConstraints(design)];
   return { ok: errors.length === 0, errors, warnings };
+}
+
+function validatePolicy(design, errors) {
+  const intensity = design.designIntensity;
+  if (!isPlain(intensity) || !Number.isInteger(intensity.value) || intensity.value < 0 || intensity.value > 100 ||
+      !isPlain(intensity.categories) || Object.values(intensity.categories).some((v) => !Number.isInteger(v) || v < 0 || v > 100)) {
+    errors.push({ code: 'INVALID_INTENSITY', message: 'Design intensity and categories must be integers from 0 to 100' });
+  }
+  if (!isPlain(design.constraints)) errors.push({ code: 'INVALID_CONSTRAINT', message: 'constraints must be an object' });
+}
+
+function checkConstraints(design) {
+  const warnings = [];
+  const constraints = design.constraints || {};
+  const targets = design.order.flatMap((id) => [
+    id,
+    ...Object.keys(design.components[id].targets || {})
+  ]);
+  const byBreakpoint = (bp) => targets.map((id) => ({ id, style: resolveStyle(design, id, bp) }));
+  const breakpoints = [null, ...BREAKPOINT_NAMES];
+
+  for (const bp of breakpoints) {
+    const targetStyles = byBreakpoint(bp);
+    const animations = targetStyles.filter(({ style }) => style?.motion?.enabled &&
+      (style.motion.entrance !== 'none' || style.motion.exit !== 'none')).length;
+    if (constraints.maxAnimationsPerViewport !== null && constraints.maxAnimationsPerViewport !== undefined &&
+        animations > constraints.maxAnimationsPerViewport) {
+      warnings.push({ code: 'CONSTRAINT_MAX_ANIMATIONS', breakpoint: bp || 'base', actual: animations, limit: constraints.maxAnimationsPerViewport, message: 'Maximum animations per viewport exceeded' });
+    }
+    let decorativeLayers = 0;
+    for (const { id, style } of targetStyles) {
+      const decor = style?.effects?.decorativeLayers || 0;
+      decorativeLayers += decor;
+      if (constraints.maximumTextWidth !== null && constraints.maximumTextWidth !== undefined) {
+        const width = toPx(style?.typography?.textWidth);
+        if (width !== null && width > constraints.maximumTextWidth) warnings.push({
+          code: 'CONSTRAINT_TEXT_WIDTH', componentId: id, breakpoint: bp || 'base',
+          actual: width, limit: constraints.maximumTextWidth, message: 'Maximum text width exceeded'
+        });
+      }
+      if (constraints.minimumTouchTarget !== null && constraints.minimumTouchTarget !== undefined) {
+        const size = toPx(style?.accessibility?.minTouchTarget ?? style?.sizing?.minHeight);
+        if (size !== null && size < constraints.minimumTouchTarget) warnings.push({
+          code: 'CONSTRAINT_TOUCH_TARGET', componentId: id, breakpoint: bp || 'base',
+          actual: size, limit: constraints.minimumTouchTarget, message: 'Minimum touch target constraint violated'
+        });
+      }
+      if (constraints.reducedMotion && style?.motion?.enabled && style.motion.reducedMotion !== 'disable') warnings.push({
+        code: 'CONSTRAINT_REDUCED_MOTION', componentId: id, breakpoint: bp || 'base', message: 'Motion does not honor the reduced-motion constraint'
+      });
+    }
+    if (constraints.maximumDecorativeLayers !== null && constraints.maximumDecorativeLayers !== undefined &&
+        decorativeLayers > constraints.maximumDecorativeLayers) warnings.push({
+      code: 'CONSTRAINT_DECORATIVE_LAYERS', breakpoint: bp || 'base', actual: decorativeLayers,
+      limit: constraints.maximumDecorativeLayers, message: 'Maximum decorative layers exceeded'
+    });
+  }
+  if (constraints.preserveLayaPhiStructure && (!design.source?.components || design.order.length !== design.source.components.length)) {
+    warnings.push({ code: 'CONSTRAINT_STRUCTURE', message: 'LayaPhi structure preservation constraint is violated' });
+  }
+  return warnings;
 }

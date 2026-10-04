@@ -3,7 +3,7 @@
 
 const ID_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
-export function ingestLayout(layoutSpec) {
+export function ingestLayout(layoutSpec, { allowEmpty = false } = {}) {
   const errors = [];
   if (!layoutSpec || typeof layoutSpec !== 'object' || Array.isArray(layoutSpec)) {
     return { ok: false, errors: [{ code: 'INVALID_LAYOUT', message: 'Layout spec must be an object' }] };
@@ -11,8 +11,8 @@ export function ingestLayout(layoutSpec) {
   if (typeof layoutSpec.pageType !== 'string' || !layoutSpec.pageType) {
     errors.push({ code: 'INVALID_LAYOUT', message: 'pageType must be a non-empty string' });
   }
-  if (!Array.isArray(layoutSpec.components) || layoutSpec.components.length === 0) {
-    errors.push({ code: 'INVALID_LAYOUT', message: 'components must be a non-empty array' });
+  if (!Array.isArray(layoutSpec.components) || (!allowEmpty && layoutSpec.components.length === 0)) {
+    errors.push({ code: 'INVALID_LAYOUT', message: `components must be ${allowEmpty ? 'an array' : 'a non-empty array'}` });
   } else {
     const seen = new Set();
     layoutSpec.components.forEach((c, i) => {
@@ -50,4 +50,78 @@ export function verifyPreserved(layoutSpec, design) {
   return { ok: errors.length === 0, errors };
 }
 
+/** Reconcile LayaPhi-owned structure while retaining design data only for exact stable paths. */
+export function syncLayout(existingDesign, newLayoutSpec) {
+  if (!existingDesign) {
+    return { ok: false, errors: [{ code: 'NO_DESIGN', message: 'An existing design is required' }] };
+  }
+  const ing = ingestLayout(newLayoutSpec, { allowEmpty: true });
+  if (!ing.ok) return ing;
+
+  const next = structuredClone(existingDesign);
+  const previous = new Map((existingDesign.source?.components || []).map((entry) => [entry.id, entry]));
+  const incomingIds = new Set(ing.layout.components.map((entry) => entry.id));
+  const added = [];
+  const removed = (existingDesign.order || []).filter((id) => !incomingIds.has(id));
+  const preserved = [];
+  const changed = [];
+  const warnings = [];
+  const components = {};
+
+  for (const entry of ing.layout.components) {
+    const id = entry.id;
+    const old = existingDesign.components[id];
+    if (!old) {
+      components[id] = createComponentRecord(entry);
+      added.push(id);
+      continue;
+    }
+    const record = createComponentRecord(entry);
+    record.style = structuredClone(old.style || {});
+    record.responsive = structuredClone(old.responsive || record.responsive);
+    for (const [path, target] of Object.entries(record.targets)) {
+      const prior = old.targets?.[path];
+      if (!prior) continue;
+      target.style = structuredClone(prior.style || {});
+      target.responsive = structuredClone(prior.responsive || target.responsive);
+    }
+    components[id] = record;
+    const before = previous.get(id);
+    if (before && before.type === entry.type && JSON.stringify(before.layout || {}) === JSON.stringify(record.layout)) preserved.push(id);
+    else {
+      changed.push(id);
+      if (old.type !== entry.type) {
+        warnings.push({ code: 'TYPE_CHANGED_STYLE_PRESERVED', componentId: id, message: `Preserved styling for "${id}" despite its LayaPhi type changing` });
+      }
+    }
+  }
+
+  const validLockTargets = new Set(Object.keys(components));
+  for (const [id, comp] of Object.entries(components)) {
+    for (const path of Object.keys(comp.targets || {})) validLockTargets.add(path);
+  }
+  const oldLocks = next.locks?.components || {};
+  next.locks.components = Object.fromEntries(Object.entries(oldLocks).filter(([id]) => validLockTargets.has(id)));
+  for (const id of removed) {
+    if (oldLocks[id]?.locked || oldLocks[id]?.properties?.length) {
+      warnings.push({ code: 'REMOVED_LOCKED_COMPONENT', componentId: id, message: `Removed locks for deleted LayaPhi component "${id}"` });
+    }
+  }
+
+  next.pageType = ing.layout.pageType;
+  next.components = components;
+  next.order = ing.layout.components.map((entry) => entry.id);
+  next.source.components = ing.layout.components.map((entry) => {
+    const { id, type, ...layout } = entry;
+    return { id, type, layout: structuredClone(layout) };
+  });
+  return {
+    ok: true,
+    design: next,
+    layout: ing.layout,
+    report: { added, removed, preserved, changed, warnings }
+  };
+}
+
 export const createLayaPhiAdapter = () => ({ ingest: ingestLayout, verify: verifyPreserved });
+import { createComponentRecord } from '../schema/component-schema.js';

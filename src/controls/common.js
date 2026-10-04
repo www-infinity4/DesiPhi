@@ -74,6 +74,17 @@ export function validateValue(spec, value) {
       return isLength(value) ? null : 'expected number or length';
     case 'object':
       return isPlain(value) ? null : 'expected an object';
+    case 'array':
+      if (!Array.isArray(value)) return 'expected an array';
+      if (spec.maxItems !== undefined && value.length > spec.maxItems) return `must contain at most ${spec.maxItems} items`;
+      for (const item of value) {
+        const message = validateValue(spec.items, item);
+        if (message) return message;
+      }
+      return null;
+    case 'asset':
+      return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(value) &&
+        !value.split('/').includes('..') ? null : 'expected a safe asset reference';
     default:
       return `unknown spec type ${spec.type}`;
   }
@@ -85,3 +96,5 @@ export const LENGTH = { type: 'length' };
 export const COLOR = { type: 'color' };
 export const CSS = { type: 'css' };
 export const BOOL = { type: 'boolean' };
+export const ASSET = { type: 'asset' };
+export const ARRAY = (items, maxItems = 20) => ({ type: 'array', items, maxItems });

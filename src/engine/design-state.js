@@ -5,6 +5,17 @@ import { defaultsFor, deepMerge } from '../components/index.js';
 
 export const clone = (v) => structuredClone(v);
 
+export function getTargetRecord(design, targetPath) {
+  const [componentId, ...nested] = targetPath.split('/');
+  const component = design.components[componentId];
+  if (!component) return null;
+  return nested.length ? component.targets?.[targetPath] || null : component;
+}
+
+export function parentComponentId(targetPath) {
+  return targetPath.split('/')[0];
+}
+
 export function getPath(obj, path) {
   let cur = obj;
   for (const seg of path.split('.')) {
@@ -41,9 +52,10 @@ export function deletePath(obj, path) {
 
 /** Style resolved without responsive overrides: type defaults (from tokens) + component style. */
 export function resolveBaseStyle(design, componentId) {
-  const comp = design.components[componentId];
-  if (!comp) return null;
-  return deepMerge(defaultsFor(comp.type, design.tokens), clone(comp.style));
+  const target = getTargetRecord(design, componentId);
+  if (!target) return null;
+  const type = target.type || design.components[parentComponentId(componentId)].type;
+  return deepMerge(defaultsFor(type, design.tokens), clone(target.style));
 }
 
 /**
@@ -53,5 +65,5 @@ export function resolveBaseStyle(design, componentId) {
 export function resolveStyle(design, componentId, breakpoint = null) {
   const base = resolveBaseStyle(design, componentId);
   if (!base || !breakpoint) return base;
-  return deepMerge(base, clone(design.components[componentId].responsive[breakpoint] || {}));
+  return deepMerge(base, clone(getTargetRecord(design, componentId).responsive[breakpoint] || {}));
 }
