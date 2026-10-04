@@ -2,7 +2,7 @@
 // Each control module declares `fields` using the spec types validated here.
 
 const LENGTH_RE = /^-?\d+(\.\d+)?(px|rem|em|%|vh|vw|vmin|vmax|dvh|svh|ch|fr)?$/;
-const FUNC_RE = /^(calc|clamp|min|max)\([0-9a-z%+\-*/.,() ]+\)$/i;
+const FUNC_RE = /^(calc|clamp|min|max)\((?!.*(var|attr|env|url)\()[0-9a-z%+\-*/.,() ]+\)$/i;
 const COLOR_FUNC_RE = /^(rgb|rgba|hsl|hsla)\([0-9a-z%., /-]+\)$/i;
 const HEX_RE = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 const RATIO_RE = /^\d+(\.\d+)?\s*\/\s*\d+(\.\d+)?$/;

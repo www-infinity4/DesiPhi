@@ -12,7 +12,7 @@ const MODULES = [cards, buttons, navigation, heroes, media, characters, decorati
 
 export function deepMerge(target, source) {
   for (const [k, v] of Object.entries(source)) {
-    if (v === undefined) continue;
+    if (v === undefined || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
     if (isPlain(v)) {
       if (!isPlain(target[k])) target[k] = {};
       deepMerge(target[k], v);

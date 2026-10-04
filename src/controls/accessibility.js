@@ -1,4 +1,6 @@
-import { CSS, BOOL, num } from './common.js';
+import { CSS, BOOL, num, toPx } from './common.js';
+import { resolveStyle } from '../engine/design-state.js';
+import { BREAKPOINT_NAMES } from './responsive.js';
 
 export default {
   group: 'accessibility',
@@ -10,9 +12,6 @@ export default {
 };
 
 // ---- Validation hooks. They only REPORT; they never modify a design. ----
-import { toPx } from './common.js';
-import { resolveStyle } from '../engine/design-state.js';
-import { BREAKPOINT_NAMES } from './responsive.js';
 
 const INTERACTIVE = ['button', 'cta', 'quiz', 'navigation', 'nav', 'menu'];
 

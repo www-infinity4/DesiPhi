@@ -64,6 +64,7 @@ export class DesignEngine {
     this.design = clone(d);
     this.layout = null;
     this.history.clear();
+    this.snapshots.clear();
     return { ok: true, design: clone(this.design) };
   }
 
@@ -251,7 +252,14 @@ export class DesignEngine {
   transaction(fn) {
     const design = this.design ? clone(this.design) : null;
     const saved = this.history.save();
-    const results = fn(this);
+    let results;
+    try {
+      results = fn(this);
+    } catch (err) {
+      this.design = design;
+      this.history.load(saved);
+      return { ok: false, results: [], errors: [{ code: 'TRANSACTION_FAILED', message: String(err?.message || err) }] };
+    }
     if (results.every((r) => r.ok)) return { ok: true, results };
     this.design = design;
     this.history.load(saved);

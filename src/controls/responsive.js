@@ -10,6 +10,6 @@ export const BREAKPOINT_NAMES = BREAKPOINTS.map((b) => b.name);
 export const isBreakpoint = (name) => BREAKPOINT_NAMES.includes(name);
 
 export function breakpointForWidth(width) {
-  const bp = BREAKPOINTS.find((b) => width >= b.minWidth && width <= b.maxWidth);
-  return bp ? bp.name : 'wide';
+  if (!(width >= 0)) return BREAKPOINTS[0].name;
+  return [...BREAKPOINTS].reverse().find((b) => width >= b.minWidth).name;
 }
