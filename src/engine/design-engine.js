@@ -29,7 +29,7 @@ export class DesignEngine {
 
   // ---- creation / import / export ----
 
-  createDesign(layoutSpec, { theme = 'educational' } = {}) {
+  createDesign(layoutSpec, { theme = 'oracle' } = {}) {
     const ing = ingestLayout(layoutSpec);
     if (!ing.ok) return ing;
     const t = resolveTheme(theme, this.themes);
