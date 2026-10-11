@@ -46,7 +46,7 @@ test('global property locks apply to every component and theme tokens', () => {
   const t = e.applyTheme('technical');
   assert.equal(t.ok, false);
   assert.equal(t.errors[0].code, 'LOCKED_GLOBAL');
-  assert.equal(e.exportDesign().theme, 'educational');
+  assert.equal(e.exportDesign().theme, 'oracle'); // rejected theme update preserves current default
   e.unlockGlobalProperty('typography.fontFamily');
   assert.ok(e.applyTheme('technical').ok);
 });
