@@ -18,6 +18,14 @@ export const PRESETS = {
     effects: { shadow:'0 12px 26px rgba(107,45,183,0.18)', glass:false, depth:2, glow:'0 0 18px rgba(132,65,223,0.25)' },
     motion: { ...base.motion, hover:'lift', reducedMotion:'disable', duration:160, transition:'all 160ms ease' }
   }),
+  'oracle-octaves': make('oracle-octaves', 'Oracle Octaves · Phi Layered Daylight', {
+    colors: { foreground:'#281f24', background:'#fbf8f1', surface:'#ffffff', accent:'#8f202d', border:'#d9cbb9' },
+    typography: { fontFamily:'system-ui, -apple-system, "Segoe UI", sans-serif', fontSize:'17px', fontWeight:500, lineHeight:1.6, letterSpacing:'0', align:'left', textWidth:'68ch' },
+    spacing: { padding:'20px', gap:'16px', margin:'0' },
+    shape: { radius:'18px', border:{ width:'1px', style:'solid', color:'#d9cbb9' } },
+    effects: { shadow:'0 6px 22px rgba(47,26,22,0.10)', glass:false, depth:2 },
+    motion: { ...base.motion, hover:'lift', reducedMotion:'disable', duration:180, transition:'all 180ms ease' }
+  }),
   educational: make('educational', 'Educational', {
     colors: { foreground: '#1f2937', background: '#fffdf7', surface: '#ffffff', accent: '#2563eb', border: '#d6dbe4' },
     typography: { fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif', fontSize: '18px', fontWeight: 400, lineHeight: 1.6, letterSpacing: '0', align: 'left', textWidth: '70ch' },
